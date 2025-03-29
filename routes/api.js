@@ -2,7 +2,35 @@ const express = require("express")
 const router = express.Router()
 const Distributor = require("../models/distributors")
 const Fruit = require("../models/fruits")
+const User = require("../models/users"); // Assuming you have a User model
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const File = require("../models/file"); // Import model File
+const multer = require("multer");
+const path = require("path");
+const upload = require("../config/common/upload"); // Chỉ khai báo một lần ở đầu file
 
+// Cấu hình nơi lưu trữ file
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/"); // Thư mục lưu file
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname)); // Đặt tên file
+  },
+});
+
+// Bộ lọc file (chỉ cho phép upload ảnh)
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only image files are allowed!"), false);
+  }
+};
+
+// Đổi tên biến multer để tránh trùng lặp
+const uploadMulter = multer({ storage, fileFilter });
 
 router.post("/distributors", async (req, res) => {
   try {
@@ -219,5 +247,144 @@ router.put("/fruits/:id", async (req, res) => {
     })
   }
 })
+
+// Delete fruit by ID
+router.delete("/fruits/:id", async (req, res) => {
+  try {
+    // Find and delete the fruit
+    const fruit = await Fruit.findByIdAndDelete(req.params.id);
+
+    if (!fruit) {
+      return res.status(404).json({
+        success: false,
+        message: "Fruit not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Fruit deleted successfully",
+      data: fruit,
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// API upload file
+router.post("/upload", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
+      });
+    }
+
+    // Lưu thông tin file vào MongoDB
+    const fileData = {
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path,
+    };
+
+    const file = await File.create(fileData);
+
+    res.status(200).json({
+      success: true,
+      message: "File uploaded successfully",
+      file,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// API upload file khác
+router.post("/uploadfile", upload.single("myfile"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
+      });
+    }
+
+    // Trả về thông tin file đã upload
+    res.status(200).json({
+      success: true,
+      message: "File uploaded successfully",
+      file: {
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        path: req.file.path,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// Login API
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    // Check if password is correct
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET || "default_secret", // Fallback for development
+      { expiresIn: "1h" }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "An error occurred during login",
+    });
+  }
+});
 
 module.exports = router
